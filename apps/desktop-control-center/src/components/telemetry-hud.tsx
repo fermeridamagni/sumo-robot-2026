@@ -1,20 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-
 /**
  * Head-Up Display overlay showing real-time telemetry statistics.
  *
- * Displays commands per second (CPS), the raw hex bytes of the last
- * packet sent, and a running frame counter. All values use tabular
- * numeric formatting for stable column alignment at 60Hz refresh.
+ * All values are now driven by props from the Rust backend's Channel API,
+ * making this component a pure display layer with no internal computation.
+ * Uses tabular numeric formatting for stable column alignment at 250Hz.
  */
 
 interface TelemetryHudProps {
-  /** Whether the gamepad is connected */
-  gamepadConnected: boolean;
-  /** Whether the serial connection is active */
+  /** Whether a controller is connected (from Rust gilrs backend) */
+  controllerConnected: boolean;
+  /** Commands per second computed by the Rust control loop */
+  cps?: number;
+  /** Whether the UDP connection to the robot is active */
   isConnected: boolean;
-  /** Round-trip latency of the motor command IPC (ms) */
-  latencyMs?: number;
+  /** UDP round-trip latency in microseconds (from Rust backend) */
+  latencyUs?: number;
   /** Direction for left motor (0=fwd, 1=rev) */
   leftDir: number;
   /** PWM value for left motor (0-255) */
@@ -32,12 +32,23 @@ interface TelemetryHudProps {
 const toHex = (n: number): string =>
   n.toString(16).toUpperCase().padStart(2, "0");
 
+/**
+ * Formats microsecond latency into a human-readable string.
+ * Values under 1000μs show as microseconds, above as milliseconds.
+ */
+const formatLatency = (us: number): string => {
+  if (us < 1000) {
+    return `${us}μs`;
+  }
+  return `${(us / 1000).toFixed(1)}ms`;
+};
+
 /** Derives the system status label from connection flags. */
 const getStatusLabel = (
   isConnected: boolean,
-  gamepadConnected: boolean
+  controllerConnected: boolean
 ): string => {
-  if (isConnected && gamepadConnected) {
+  if (isConnected && controllerConnected) {
     return "TRANSMITTING";
   }
   if (isConnected) {
@@ -48,42 +59,20 @@ const getStatusLabel = (
 
 export function TelemetryHud({
   isConnected,
-  gamepadConnected,
+  controllerConnected,
   leftPwm,
   leftDir,
   rightPwm,
   rightDir,
-  latencyMs,
+  latencyUs,
+  cps,
 }: TelemetryHudProps) {
-  const [cps, setCps] = useState(0);
-  const frameCountRef = useRef(0);
-  const lastResetRef = useRef(Date.now());
-
-  /* Calculate the XOR checksum matching the Rust backend packet format.
-   * Bitwise XOR is intentional here — this mirrors the Arduino receiver's
-   * checksum validation logic exactly. */
+  /* Calculate the XOR checksum matching the Arduino receiver's validation.
+   * Bitwise XOR is intentional here — this mirrors the binary protocol. */
   // biome-ignore lint/suspicious/noBitwiseOperators: XOR checksum is intentional binary protocol logic
   const checksum = leftDir ^ leftPwm ^ rightDir ^ rightPwm;
 
-  /* Count commands per second using a 1-second sliding window */
-  useEffect(() => {
-    if (!(isConnected && gamepadConnected)) {
-      setCps(0);
-      frameCountRef.current = 0;
-      return;
-    }
-
-    frameCountRef.current += 1;
-
-    const now = Date.now();
-    const elapsed = now - lastResetRef.current;
-
-    if (elapsed >= 1000) {
-      setCps(Math.round((frameCountRef.current / elapsed) * 1000));
-      frameCountRef.current = 0;
-      lastResetRef.current = now;
-    }
-  }, [isConnected, gamepadConnected]);
+  const isActive = isConnected && controllerConnected;
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
@@ -94,39 +83,39 @@ export function TelemetryHud({
 
       {/* Stats grid */}
       <div className="grid grid-cols-3 gap-x-6 gap-y-2">
-        {/* Commands per second */}
+        {/* Commands per second — driven by Rust backend counter */}
         <div className="flex flex-col">
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
             Cmd/s
           </span>
           <span className="font-telemetry text-foreground text-lg">
-            {isConnected && gamepadConnected ? cps : "—"}
+            {isActive ? (cps ?? "—") : "—"}
           </span>
         </div>
 
-        {/* Latency */}
+        {/* Latency — UDP round-trip in microseconds, amber above 5ms */}
         <div className="flex flex-col">
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
             Latency
           </span>
           <span
             className={`font-telemetry text-lg ${
-              isConnected && gamepadConnected && latencyMs && latencyMs > 20
+              isActive && latencyUs && latencyUs > 5000
                 ? "text-amber-500"
                 : "text-foreground"
             }`}
           >
-            {isConnected && gamepadConnected ? `${latencyMs ?? 0}ms` : "—"}
+            {isActive ? formatLatency(latencyUs ?? 0) : "—"}
           </span>
         </div>
 
-        {/* Connection mode */}
+        {/* Protocol indicator */}
         <div className="flex flex-col">
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
             Protocol
           </span>
           <span className="font-telemetry text-foreground text-lg">
-            {isConnected ? "115.2k" : "—"}
+            {isConnected ? "UDP" : "—"}
           </span>
         </div>
       </div>
@@ -138,7 +127,7 @@ export function TelemetryHud({
         </span>
 
         <div className="flex items-center gap-1 font-telemetry text-xs">
-          {isConnected && gamepadConnected ? (
+          {isActive ? (
             <>
               {/* Header byte */}
               <span className="rounded bg-muted px-1.5 py-0.5 text-foreground">
@@ -171,7 +160,7 @@ export function TelemetryHud({
         </div>
 
         {/* Packet field labels */}
-        {isConnected && gamepadConnected && (
+        {isActive && (
           <div className="flex items-center gap-1 text-[8px] text-muted-foreground/50">
             <span className="w-7.5 text-center">HDR</span>
             <span className="w-7.5 text-center">LDIR</span>
@@ -187,13 +176,13 @@ export function TelemetryHud({
       <div className="flex items-center gap-2 border-border border-t pt-2">
         <div
           className={`aspect-square size-1.5 rounded-full ${
-            isConnected && gamepadConnected
+            isActive
               ? "animate-pulse-status bg-foreground"
               : "bg-muted-foreground/30"
           }`}
         />
         <span className="text-muted-foreground text-xs">
-          {getStatusLabel(isConnected, gamepadConnected)}
+          {getStatusLabel(isConnected, controllerConnected)}
         </span>
       </div>
     </div>

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    macos_desktop_controller_lib::run()
+    desktop_control_center_lib::run()
 }

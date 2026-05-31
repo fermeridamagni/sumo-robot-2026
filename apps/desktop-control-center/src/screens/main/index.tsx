@@ -1,98 +1,87 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { ConnectionPanel } from "@/components/connection-panel";
 import { JoystickVisualizer } from "@/components/joystick-visualizer";
 import { MotorGauge } from "@/components/motor-gauge";
 import { TelemetryHud } from "@/components/telemetry-hud";
-import { useGamepad } from "@/hooks/use-gamepad";
-import type { MotorOutput } from "@/lib/arcade-drive";
-import { computeArcadeDrive } from "@/lib/arcade-drive";
-import { sendMotorCommand } from "@/lib/serial-ipc";
+import type { GamepadState, MotorOutput } from "@/lib/robot-ipc";
+import { startControlLoop } from "@/lib/robot-ipc";
 import "@/styles/globals.css";
 
-/** Derives the top-bar status label from serial and gamepad connection flags. */
+/** Derives the top-bar status label from UDP and controller connection flags. */
 const getSystemStatus = (
-  serialConnected: boolean,
-  gamepadConnected: boolean
+  udpConnected: boolean,
+  controllerConnected: boolean
 ): string => {
-  if (serialConnected && gamepadConnected) {
+  if (udpConnected && controllerConnected) {
     return "Live";
   }
-  if (serialConnected) {
+  if (udpConnected) {
     return "Awaiting Input";
   }
   return "Offline";
 };
 
 /**
- * Main controller application — composes the full telemetry dashboard.
+ * Main telemetry dashboard — displays data streamed from the Rust backend.
  *
- * This component integrates the Gamepad API polling loop, Arcade Drive
- * computation, and serial IPC dispatch into a single 60Hz control loop.
- * Motor commands are sent to the Rust backend on every animation frame
- * when both a gamepad and serial connection are active.
+ * The control loop (gamepad polling → Arcade Drive → UDP dispatch) runs
+ * entirely in Rust at ~250Hz. This component subscribes to telemetry via
+ * the Tauri Channel API and distributes state to child visualizers.
+ * No control logic lives on the frontend — it's purely a display layer.
  */
 function ControllerApp() {
-  const gamepad = useGamepad(0.08);
-  const [motorOutput, setMotorOutput] = useState<MotorOutput>({
-    leftPwm: 0,
-    leftDir: 0,
-    rightPwm: 0,
-    rightDir: 0,
-  });
-  const [serialConnected, setSerialConnected] = useState(false);
-  const [latency, setLatency] = useState(0);
-  const lastLatencyUpdateRef = useRef(0);
+  const [controlState, setControlState] = useState<{
+    gamepad: GamepadState;
+    motor: MotorOutput;
+    packet: number[];
+    cps: number;
+  } | null>(null);
+  const [robotTelemetry, setRobotTelemetry] = useState<{
+    latency_us: number;
+    arduino_uptime_ms: number;
+  } | null>(null);
+  const [udpConnected, setUdpConnected] = useState(false);
+  const [controllerConnected, setControllerConnected] = useState(false);
+  const [controllerName, setControllerName] = useState("");
 
   /**
-   * Track whether we should be sending commands.
-   * Uses a ref to avoid re-creating the rAF callback when connection
-   * state changes — the callback reads the ref instead.
-   */
-  const serialConnectedRef = useRef(false);
-  useEffect(() => {
-    serialConnectedRef.current = serialConnected;
-  }, [serialConnected]);
-
-  /**
-   * Core control loop: compute Arcade Drive output and dispatch to backend.
+   * Subscribe to telemetry when the UDP connection becomes active.
    *
-   * This runs in sync with the gamepad polling (via useGamepad's rAF loop)
-   * but we also react to axis changes here. The useGamepad hook updates
-   * state each frame, which triggers this effect and keeps the motor
-   * output in sync.
+   * The Channel stays open for the lifetime of the connection — the Rust
+   * backend pushes messages at ~250Hz without the frontend polling.
    */
   useEffect(() => {
-    const output = computeArcadeDrive(gamepad.axes.leftX, gamepad.axes.leftY);
-    setMotorOutput(output);
-
-    /* Only send commands when both gamepad and serial are active */
-    if (gamepad.connected && serialConnectedRef.current) {
-      /*
-       * Fire-and-forget: we intentionally don't await the IPC call.
-       * At 60Hz, waiting for each response would halve throughput.
-       * Errors are silently ignored — a dropped frame is acceptable
-       * for a real-time control loop.
-       */
-      const start = performance.now();
-      sendMotorCommand(
-        output.leftPwm,
-        output.leftDir,
-        output.rightPwm,
-        output.rightDir
-      ).then(() => {
-        const currentLatency = performance.now() - start;
-        const now = performance.now();
-        if (now - lastLatencyUpdateRef.current >= 500) {
-          setLatency(Math.round(currentLatency));
-          lastLatencyUpdateRef.current = now;
-        }
-      });
+    if (!udpConnected) {
+      return;
     }
-  }, [gamepad.axes.leftX, gamepad.axes.leftY, gamepad.connected]);
+
+    startControlLoop((payload) => {
+      switch (payload.type) {
+        case "ControlState":
+          setControlState(payload);
+          break;
+        case "RobotTelemetry":
+          setRobotTelemetry(payload);
+          break;
+        case "StatusChange":
+          setControllerConnected(payload.controller_connected);
+          setControllerName(payload.controller_name ?? "");
+          break;
+        default:
+          break;
+      }
+    });
+  }, [udpConnected]);
 
   const handleConnectionChange = useCallback((connected: boolean) => {
-    setSerialConnected(connected);
+    setUdpConnected(connected);
+
+    /* Reset telemetry state on disconnect so stale data doesn't linger */
+    if (!connected) {
+      setControlState(null);
+      setRobotTelemetry(null);
+    }
   }, []);
 
   return (
@@ -105,7 +94,7 @@ function ControllerApp() {
           </h1>
           <div className="h-4 w-px bg-border" />
           <span className="font-heading text-muted-foreground text-xs uppercase tracking-widest">
-            Sumo Controller
+            Sumo Control Center
           </span>
         </div>
 
@@ -113,13 +102,13 @@ function ControllerApp() {
         <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5">
           <div
             className={`size-2 rounded-full ${
-              serialConnected && gamepad.connected
+              udpConnected && controllerConnected
                 ? "animate-pulse-status bg-foreground"
                 : "bg-muted-foreground/30"
             }`}
           />
           <span className="font-telemetry text-[10px] text-muted-foreground uppercase">
-            {getSystemStatus(serialConnected, gamepad.connected)}
+            {getSystemStatus(udpConnected, controllerConnected)}
           </span>
         </div>
       </header>
@@ -129,19 +118,20 @@ function ControllerApp() {
         {/* Left sidebar — Connection & Telemetry */}
         <aside className="flex flex-col gap-4">
           <ConnectionPanel
-            gamepadConnected={gamepad.connected}
-            gamepadId={gamepad.id}
+            controllerConnected={controllerConnected}
+            controllerName={controllerName}
             onConnectionChange={handleConnectionChange}
           />
 
           <TelemetryHud
-            gamepadConnected={gamepad.connected}
-            isConnected={serialConnected}
-            latencyMs={latency}
-            leftDir={motorOutput.leftDir}
-            leftPwm={motorOutput.leftPwm}
-            rightDir={motorOutput.rightDir}
-            rightPwm={motorOutput.rightPwm}
+            controllerConnected={controllerConnected}
+            cps={controlState?.cps}
+            isConnected={udpConnected}
+            latencyUs={robotTelemetry?.latency_us}
+            leftDir={controlState?.motor.leftDir ?? 0}
+            leftPwm={controlState?.motor.leftPwm ?? 0}
+            rightDir={controlState?.motor.rightDir ?? 0}
+            rightPwm={controlState?.motor.rightPwm ?? 0}
           />
         </aside>
 
@@ -151,24 +141,31 @@ function ControllerApp() {
           <div className="flex gap-12">
             <JoystickVisualizer
               label="Left Stick"
-              motorOutput={motorOutput}
-              x={gamepad.axes.leftX}
-              y={gamepad.axes.leftY}
+              motorOutput={
+                controlState?.motor ?? {
+                  leftPwm: 0,
+                  leftDir: 0,
+                  rightPwm: 0,
+                  rightDir: 0,
+                }
+              }
+              x={controlState?.gamepad.leftX ?? 0}
+              y={controlState?.gamepad.leftY ?? 0}
             />
 
             <JoystickVisualizer
               label="Right Stick"
-              x={gamepad.axes.rightX}
-              y={gamepad.axes.rightY}
+              x={controlState?.gamepad.rightX ?? 0}
+              y={controlState?.gamepad.rightY ?? 0}
             />
           </div>
 
           {/* Motor gauges row */}
           <div className="flex items-center gap-16">
             <MotorGauge
-              direction={motorOutput.leftDir}
+              direction={controlState?.motor.leftDir ?? 0}
               label="Left Motor"
-              pwm={motorOutput.leftPwm}
+              pwm={controlState?.motor.leftPwm ?? 0}
             />
 
             {/* Center divider with robot icon */}
@@ -246,9 +243,9 @@ function ControllerApp() {
             </div>
 
             <MotorGauge
-              direction={motorOutput.rightDir}
+              direction={controlState?.motor.rightDir ?? 0}
               label="Right Motor"
-              pwm={motorOutput.rightPwm}
+              pwm={controlState?.motor.rightPwm ?? 0}
             />
           </div>
         </section>

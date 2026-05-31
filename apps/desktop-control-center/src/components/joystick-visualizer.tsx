@@ -1,4 +1,4 @@
-import type { MotorOutput } from "@/lib/arcade-drive";
+import type { MotorOutput } from "@/lib/robot-ipc";
 
 /**
  * SVG-based joystick position visualizer.

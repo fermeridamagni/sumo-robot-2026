@@ -7,7 +7,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Monochromatic OLED Theme — Magni Sumo Controller
+ * Monochromatic OLED Theme — Magni Sumo Control Center
  *
  * All chroma values are zero (pure greyscale) to maximize OLED contrast
  * and eliminate color distractions on the telemetry dashboard.
