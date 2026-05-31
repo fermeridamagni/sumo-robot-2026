@@ -2,7 +2,7 @@
 name = "desktop-control-center"
 version = "0.1.0"
 description = "Ultra-low-latency sumo robot controller — Magni Development"
-authors = ["Magni Development"]
+authors = ["fermeridamagni <Magni Development>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,4 +23,3 @@ tauri-plugin-opener = "2.5.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 gilrs = "0.11"
-

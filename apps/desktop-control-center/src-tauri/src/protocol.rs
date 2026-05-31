@@ -30,6 +30,7 @@ pub const TELEMETRY_HEADER: u8 = 0xFE;
 ///
 /// PWM range is 0–255 (full 8-bit duty cycle).
 #[derive(Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct MotorOutput {
     pub left_dir: u8,
     pub left_pwm: u8,

@@ -12,6 +12,7 @@ use serde::Serialize;
 /// Snapshot of all gamepad axes and connection state at a single point
 /// in time. Sent to the frontend as part of telemetry.
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ControllerState {
     pub left_x: f32,
     pub left_y: f32,
@@ -76,7 +77,9 @@ pub fn read_gamepad(gilrs: &mut Gilrs) -> ControllerState {
     // Drain all pending events to keep the internal state up-to-date.
     // We don't inspect individual events — we just need gilrs to
     // process them so `gamepad.value()` returns fresh data.
-    while gilrs.next_event().is_some() {}
+    while let Some(event) = gilrs.next_event() {
+        println!("[gilrs debug] {:?}", event);
+    }
 
     // Find the first connected gamepad. In a sumo competition there's
     // only ever one controller, so picking the first is correct.
@@ -88,9 +91,9 @@ pub fn read_gamepad(gilrs: &mut Gilrs) -> ControllerState {
 
     // Read raw axis values and apply deadzone compensation.
     let left_x = apply_deadzone(gamepad.value(Axis::LeftStickX), DEADZONE);
-    let left_y = apply_deadzone(gamepad.value(Axis::LeftStickY), DEADZONE);
+    let left_y = -apply_deadzone(gamepad.value(Axis::LeftStickY), DEADZONE);
     let right_x = apply_deadzone(gamepad.value(Axis::RightStickX), DEADZONE);
-    let right_y = apply_deadzone(gamepad.value(Axis::RightStickY), DEADZONE);
+    let right_y = -apply_deadzone(gamepad.value(Axis::RightStickY), DEADZONE);
 
     ControllerState {
         left_x,

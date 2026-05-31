@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Magni Sumo Control Center",
+  "productName": "Sumo Control Center",
   "version": "0.1.0",
-  "identifier": "dev.magni.sumo-controller",
+  "identifier": "dev.fermeridamagni.sumo-controller",
   "build": {
     "beforeDevCommand": "bun run vite:dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Magni — Sumo Control Center",
+        "title": "Sumo Control Center",
         "maximizable": true,
         "resizable": true,
         "fullscreen": true,

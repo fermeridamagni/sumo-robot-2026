@@ -89,9 +89,6 @@ function ControllerApp() {
       {/* Top bar — Branding */}
       <header className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="font-bold font-heading text-foreground text-xl uppercase tracking-[0.2em]">
-            Magni
-          </h1>
           <div className="h-4 w-px bg-border" />
           <span className="font-heading text-muted-foreground text-xs uppercase tracking-widest">
             Sumo Control Center

@@ -28,8 +28,8 @@ use crate::protocol::MotorOutput;
 #[inline]
 pub fn compute_arcade_drive(x: f32, y: f32) -> MotorOutput {
     // Mix throttle and steering into per-side power values.
-    let left = (y + x).clamp(-1.0, 1.0);
-    let right = (y - x).clamp(-1.0, 1.0);
+    let left = (y - x).clamp(-1.0, 1.0);
+    let right = (y + x).clamp(-1.0, 1.0);
 
     // Decompose signed float into direction bit + unsigned PWM byte.
     // Positive values = forward (dir 0), negative = reverse (dir 1).
