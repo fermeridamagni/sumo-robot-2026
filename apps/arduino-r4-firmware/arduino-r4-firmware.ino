@@ -1,5 +1,5 @@
 // =============================================================
-// MAGNI Sumo Robot — Arduino UNO R4 WiFi Firmware
+// Sumo Robot — Arduino UNO R4 WiFi Firmware
 // =============================================================
 //
 // This firmware runs on an Arduino UNO R4 WiFi and controls a
@@ -47,12 +47,12 @@
 // #define WIFI_MODE_STATION
 
 // --- AP Mode credentials (robot creates this network) ---
-const char AP_SSID[]     = "MAGNI_SUMO";
+const char AP_SSID[] = "MAGNI_SUMO";
 const char AP_PASSWORD[] = "magni2026";
 
 // --- Station Mode credentials (robot joins this network) ---
 // Only used when WIFI_MODE_STATION is defined.
-const char STA_SSID[]     = "YOUR_NETWORK_NAME";
+const char STA_SSID[] = "YOUR_NETWORK_NAME";
 const char STA_PASSWORD[] = "YOUR_NETWORK_PASSWORD";
 
 // =============================================================
@@ -66,21 +66,21 @@ WiFiUDP udp;
 // Motor Pin Mapping (L298N H-Bridge)
 // =============================================================
 // Left motor
-const uint8_t ENA = 5;   // PWM speed control
-const uint8_t IN1 = 6;   // Direction pin A
-const uint8_t IN2 = 7;   // Direction pin B
+const uint8_t ENA = 6; // PWM speed control
+const uint8_t IN1 = 4; // Direction pin A
+const uint8_t IN2 = 5; // Direction pin B
 
 // Right motor
-const uint8_t IN3 = 8;   // Direction pin A
-const uint8_t IN4 = 9;   // Direction pin B
-const uint8_t ENB = 10;  // PWM speed control
+const uint8_t IN3 = 1; // Direction pin A
+const uint8_t IN4 = 2; // Direction pin B
+const uint8_t ENB = 3; // PWM speed control
 
 // =============================================================
 // Protocol Constants
 // =============================================================
-const uint8_t HEADER_BYTE    = 0xFF;  // Packet start marker
-const uint8_t TELEMETRY_HEADER = 0xFE;  // Telemetry reply marker
-const uint8_t PACKET_SIZE    = 6;     // Total bytes per command packet
+const uint8_t HEADER_BYTE = 0xFF;      // Packet start marker
+const uint8_t TELEMETRY_HEADER = 0xFE; // Telemetry reply marker
+const uint8_t PACKET_SIZE = 6;         // Total bytes per command packet
 
 // =============================================================
 // Watchdog / Fail-Safe
@@ -129,11 +129,12 @@ uint8_t rPwm = 0;
 unsigned long lastValidPacketTime = 0;
 
 // Telemetry
-uint8_t telemetrySeqNum = 0;  // Wraps 0–255 automatically
+uint8_t telemetrySeqNum = 0; // Wraps 0–255 automatically
+unsigned long lastTelemetryTime = 0;
 
 // Packet statistics (for serial debug output)
-uint32_t packetsReceived  = 0;
-uint32_t packetsValid     = 0;
+uint32_t packetsReceived = 0;
+uint32_t packetsValid = 0;
 uint32_t packetsCorrupted = 0;
 
 // Track whether motors are currently active (for LED control)
@@ -142,7 +143,8 @@ bool motorsActive = false;
 // =============================================================
 // Forward Declarations
 // =============================================================
-void setMotors(uint8_t leftDir, uint8_t leftPwm, uint8_t rightDir, uint8_t rightPwm);
+void setMotors(uint8_t leftDir, uint8_t leftPwm, uint8_t rightDir,
+               uint8_t rightPwm);
 void emergencyStop();
 void setupWiFiAP();
 void setupWiFiStation();
@@ -161,7 +163,7 @@ void setup() {
   delay(1000);
   Serial.println(F(""));
   Serial.println(F("========================================"));
-  Serial.println(F("  MAGNI Sumo Robot — R4 WiFi Firmware"));
+  Serial.println(F("Sumo Robot — R4 WiFi Firmware"));
   Serial.println(F("========================================"));
 
   // --- Configure motor pins ---
@@ -185,7 +187,7 @@ void setup() {
 #elif defined(WIFI_MODE_STATION)
   setupWiFiStation();
 #else
-  #error "Please define either WIFI_MODE_AP or WIFI_MODE_STATION"
+#error "Please define either WIFI_MODE_AP or WIFI_MODE_STATION"
 #endif
 
   // --- Start UDP listener ---
@@ -231,7 +233,7 @@ void loop() {
     if (motorsActive) {
       emergencyStop();
       motorsActive = false;
-      digitalWrite(STATUS_LED, LOW);  // LED off when idle
+      digitalWrite(STATUS_LED, LOW); // LED off when idle
       Serial.println(F("[WATCHDOG] Timeout — emergency stop!"));
     }
   }
@@ -246,63 +248,70 @@ void loop() {
 void processByte(uint8_t b) {
   switch (parserState) {
 
-    case WAITING_FOR_HEADER:
-      // Only advance when we see the 0xFF header byte.
-      // Any other byte is silently discarded (re-sync).
-      if (b == HEADER_BYTE) {
-        parserState = READING_L_DIR;
-      }
-      break;
-
-    case READING_L_DIR:
-      lDir = b;
-      parserState = READING_L_PWM;
-      break;
-
-    case READING_L_PWM:
-      lPwm = b;
-      parserState = READING_R_DIR;
-      break;
-
-    case READING_R_DIR:
-      rDir = b;
-      parserState = READING_R_PWM;
-      break;
-
-    case READING_R_PWM:
-      rPwm = b;
-      parserState = READING_CHECKSUM;
-      break;
-
-    case READING_CHECKSUM: {
-      uint8_t received   = b;
-      uint8_t calculated = lDir ^ lPwm ^ rDir ^ rPwm;
-
-      if (calculated == received) {
-        // Valid packet — apply motor commands
-        setMotors(lDir, lPwm, rDir, rPwm);
-        lastValidPacketTime = millis();
-        motorsActive = true;
-        packetsValid++;
-
-        // Turn LED on to show we're actively receiving commands
-        digitalWrite(STATUS_LED, HIGH);
-
-        // Send telemetry heartbeat back to the sender
-        sendTelemetry();
-      } else {
-        // Checksum mismatch — discard this packet
-        packetsCorrupted++;
-        Serial.print(F("[PROTO] Checksum mismatch — expected 0x"));
-        Serial.print(calculated, HEX);
-        Serial.print(F(", got 0x"));
-        Serial.println(received, HEX);
-      }
-
-      // Always reset to wait for the next packet header
-      parserState = WAITING_FOR_HEADER;
-      break;
+  case WAITING_FOR_HEADER:
+    // Only advance when we see the 0xFF header byte.
+    // Any other byte is silently discarded (re-sync).
+    if (b == HEADER_BYTE) {
+      parserState = READING_L_DIR;
     }
+    break;
+
+  case READING_L_DIR:
+    lDir = b;
+    parserState = READING_L_PWM;
+    break;
+
+  case READING_L_PWM:
+    lPwm = b;
+    parserState = READING_R_DIR;
+    break;
+
+  case READING_R_DIR:
+    rDir = b;
+    parserState = READING_R_PWM;
+    break;
+
+  case READING_R_PWM:
+    rPwm = b;
+    parserState = READING_CHECKSUM;
+    break;
+
+  case READING_CHECKSUM: {
+    uint8_t received = b;
+    uint8_t calculated = lDir ^ lPwm ^ rDir ^ rPwm;
+
+    if (calculated == received) {
+      // Valid packet — apply motor commands
+      setMotors(lDir, lPwm, rDir, rPwm);
+      lastValidPacketTime = millis();
+      motorsActive = true;
+      packetsValid++;
+
+      // Turn LED on to show we're actively receiving commands
+      digitalWrite(STATUS_LED, HIGH);
+
+      // Send telemetry heartbeat back to the sender (throttled to 20Hz)
+      // The Arduino R4 WiFi uses an ESP32 coprocessor, and sending UDP packets
+      // via the internal AT command bridge takes time. If we reply to every
+      // 250Hz command, it blocks the main loop. Throttling ensures motors react
+      // instantly.
+      if (millis() - lastTelemetryTime >= 50) {
+        sendTelemetry();
+        lastTelemetryTime = millis();
+      }
+    } else {
+      // Checksum mismatch — discard this packet
+      packetsCorrupted++;
+      Serial.print(F("[PROTO] Checksum mismatch — expected 0x"));
+      Serial.print(calculated, HEX);
+      Serial.print(F(", got 0x"));
+      Serial.println(received, HEX);
+    }
+
+    // Always reset to wait for the next packet header
+    parserState = WAITING_FOR_HEADER;
+    break;
+  }
   }
 }
 
@@ -315,10 +324,10 @@ void sendTelemetry() {
   uint16_t uptime = (uint16_t)(millis() & 0xFFFF);
 
   uint8_t reply[4];
-  reply[0] = TELEMETRY_HEADER;          // 0xFE
-  reply[1] = telemetrySeqNum++;         // Wraps at 255 → 0
-  reply[2] = (uint8_t)(uptime & 0xFF);  // Uptime low byte
-  reply[3] = (uint8_t)(uptime >> 8);    // Uptime high byte
+  reply[0] = TELEMETRY_HEADER;         // 0xFE
+  reply[1] = telemetrySeqNum++;        // Wraps at 255 → 0
+  reply[2] = (uint8_t)(uptime & 0xFF); // Uptime low byte
+  reply[3] = (uint8_t)(uptime >> 8);   // Uptime high byte
 
   // Reply to whoever sent us the last packet
   udp.beginPacket(udp.remoteIP(), udp.remotePort());
@@ -332,7 +341,8 @@ void sendTelemetry() {
 // Drives both motors with the specified direction and PWM speed.
 //   dir = 0x00 → forward (IN_A = HIGH, IN_B = LOW)
 //   dir = 0x01 → reverse (IN_A = LOW,  IN_B = HIGH)
-void setMotors(uint8_t leftDir, uint8_t leftPwm, uint8_t rightDir, uint8_t rightPwm) {
+void setMotors(uint8_t leftDir, uint8_t leftPwm, uint8_t rightDir,
+               uint8_t rightPwm) {
   // Left motor direction
   if (leftDir == 0x00) {
     digitalWrite(IN1, HIGH);
@@ -414,7 +424,7 @@ void setupWiFiStation() {
   Serial.println(STA_SSID);
 
   int attempts = 0;
-  const int maxAttempts = 20;  // ~10 seconds total
+  const int maxAttempts = 20; // ~10 seconds total
 
   while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
     // Blink LED on each attempt so we can see it's trying
