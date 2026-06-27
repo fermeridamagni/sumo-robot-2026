@@ -63,17 +63,17 @@ const uint16_t UDP_PORT = 4210;
 WiFiUDP udp;
 
 // =============================================================
-// Motor Pin Mapping (L298N H-Bridge)
+// Motor Pin Mapping (2x BTS7960)
 // =============================================================
-// Left motor
-const uint8_t ENA = 6; // PWM speed control
-const uint8_t IN1 = 4; // Direction pin A
-const uint8_t IN2 = 5; // Direction pin B
+// El Arduino UNO R4 WiFi soporta PWM en los pines 3, 5, 6, 9, 10, 11
 
-// Right motor
-const uint8_t IN3 = 1; // Direction pin A
-const uint8_t IN4 = 2; // Direction pin B
-const uint8_t ENB = 3; // PWM speed control
+// Módulo Izquierdo (Left motor)
+const uint8_t RPWM_L = 5; // PWM para Adelante
+const uint8_t LPWM_L = 4; // PWM para Reversa
+
+// Módulo Derecho (Right motor)
+const uint8_t RPWM_R = 2; // PWM para Adelante
+const uint8_t LPWM_R = 3; // PWM para Reversa
 
 // =============================================================
 // Protocol Constants
@@ -166,13 +166,11 @@ void setup() {
   Serial.println(F("Sumo Robot — R4 WiFi Firmware"));
   Serial.println(F("========================================"));
 
-  // --- Configure motor pins ---
-  pinMode(ENA, OUTPUT);
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT);
-  pinMode(IN4, OUTPUT);
-  pinMode(ENB, OUTPUT);
+  // --- Configure motor pins (BTS7960) ---
+  pinMode(RPWM_L, OUTPUT);
+  pinMode(LPWM_L, OUTPUT);
+  pinMode(RPWM_R, OUTPUT);
+  pinMode(LPWM_R, OUTPUT);
 
   // Start with motors stopped for safety
   emergencyStop();
@@ -336,49 +334,40 @@ void sendTelemetry() {
 }
 
 // =============================================================
-// Motor Control
+// Motor Control (BTS7960)
 // =============================================================
-// Drives both motors with the specified direction and PWM speed.
-//   dir = 0x00 → forward (IN_A = HIGH, IN_B = LOW)
-//   dir = 0x01 → reverse (IN_A = LOW,  IN_B = HIGH)
 void setMotors(uint8_t leftDir, uint8_t leftPwm, uint8_t rightDir,
                uint8_t rightPwm) {
-  // Left motor direction
-  if (leftDir == 0x00) {
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-  } else {
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, HIGH);
+  // Motor Izquierdo
+  if (leftDir == 0x00) { // Adelante
+    analogWrite(RPWM_L, leftPwm);
+    analogWrite(LPWM_L, 0);
+  } else { // Reversa
+    analogWrite(RPWM_L, 0);
+    analogWrite(LPWM_L, leftPwm);
   }
-  analogWrite(ENA, leftPwm);
 
-  // Right motor direction
-  if (rightDir == 0x00) {
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
-  } else {
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, HIGH);
+  // Motor Derecho
+  if (rightDir == 0x00) { // Adelante
+    analogWrite(RPWM_R, rightPwm);
+    analogWrite(LPWM_R, 0);
+  } else { // Reversa
+    analogWrite(RPWM_R, 0);
+    analogWrite(LPWM_R, rightPwm);
   }
-  analogWrite(ENB, rightPwm);
 }
 
 // =============================================================
-// Emergency Stop
-// =============================================================
-// Immediately kills all motor outputs. Called by the watchdog
+// Emergency Stop (BTS7960)
+//
+// Immediately kills all motor outputs. Called by the w atchdog
 // on timeout and during setup for a known-safe initial state.
+// =============================================================
 void emergencyStop() {
-  // Cut PWM first for fastest stop
-  analogWrite(ENA, 0);
-  analogWrite(ENB, 0);
-
-  // Then clear direction pins
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+  analogWrite(RPWM_L, 0);
+  analogWrite(LPWM_L, 0);
+  analogWrite(RPWM_R, 0);
+  analogWrite(LPWM_R, 0);
 }
 
 // =============================================================
